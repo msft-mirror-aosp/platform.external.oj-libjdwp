@@ -11,7 +11,7 @@ java_binary_host {
 genrule {
     name: "jdwp_generated_headers",
     tools: ["jdwpgen"],
-    cmd: "jdwpgen $(in) -include $(out)",
+    cmd: "$(location jdwpgen) $(in) -include $(out)",
     srcs: ["make/data/jdwp/jdwp.spec"],
     out: ["JDWPCommands.h"],
 }
