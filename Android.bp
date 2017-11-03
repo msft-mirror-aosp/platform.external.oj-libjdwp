@@ -34,10 +34,21 @@ cc_library_headers {
     name: "javavm_headers",
     export_include_dirs: [
         "src/share/javavm/export",
-        "src/solaris/javavm/export",
     ],
     host_supported: true,
     device_supported: true,
+    target: {
+        linux: {
+            export_include_dirs: [
+                "src/solaris/javavm/export",
+            ],
+        },
+        darwin: {
+            export_include_dirs: [
+                "src/macosx/javavm/export",
+            ],
+        },
+    },
 }
 
 cc_library_headers {
