@@ -593,8 +593,10 @@ getResumee(jthread resumingThread)
     jobject object;
     FrameNumber fnum = 0;
 
-    error = JVMTI_FUNC_PTR(gdata->jvmti,GetLocalObject)
-                    (gdata->jvmti, resumingThread, fnum, 0, &object);
+    // ANDROID-CHANGED: On ART 'this' is not always in register 0. We just use GetLocalInstance in
+    // all cases.
+    error = JVMTI_FUNC_PTR(gdata->jvmti,GetLocalInstance)
+                    (gdata->jvmti, resumingThread, fnum, &object);
     if (error == JVMTI_ERROR_NONE) {
         resumee = object;
     }
