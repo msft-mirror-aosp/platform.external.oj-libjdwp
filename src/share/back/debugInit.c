@@ -268,8 +268,9 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
         forceExit(1); /* Kill entire process, no core dump wanted */
     }
 
+    // ANDROID-CHANGED: Android uses java.library.path to store all library path information.
     JVMTI_FUNC_PTR(gdata->jvmti, GetSystemProperty)
-        (gdata->jvmti, (const char *)"sun.boot.library.path",
+        (gdata->jvmti, (const char *)"java.library.path",
          &boot_path);
 
     dbgsysBuildLibName(npt_lib, sizeof(npt_lib), boot_path, NPT_LIBNAME);
