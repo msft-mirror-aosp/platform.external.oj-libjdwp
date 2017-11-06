@@ -394,8 +394,10 @@ thisObject(PacketInputStream *in, PacketOutputStream *out)
                     (void)outStream_writeByte(out, specificTypeKey(env, this_object));
                     (void)outStream_writeObjectRef(env, out, this_object);
                 } else {
-                    error = JVMTI_FUNC_PTR(gdata->jvmti,GetLocalObject)
-                                (gdata->jvmti, thread, fnum, 0, &this_object);
+                    // ANDROID-CHANGED: On ART 'this' is not always in register 0. We just use
+                    // GetLocalInstance in all cases.
+                    error = JVMTI_FUNC_PTR(gdata->jvmti,GetLocalInstance)
+                                (gdata->jvmti, thread, fnum, &this_object);
                     if (error == JVMTI_ERROR_NONE) {
                         (void)outStream_writeByte(out, specificTypeKey(env, this_object));
                         (void)outStream_writeObjectRef(env, out, this_object);
