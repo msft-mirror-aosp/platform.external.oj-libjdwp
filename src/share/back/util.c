@@ -246,14 +246,18 @@ util_initialize(JNIEnv *env)
                         = getPropertyUTF8(env, "java.version");
         gdata->property_java_vm_name
                         = getPropertyUTF8(env, "java.vm.name");
-        gdata->property_java_vm_info
-                        = getPropertyUTF8(env, "java.vm.info");
+        // ANDROID-CHANGED: Android doesn't provide the 'java.vm.info' property. Just provide the
+        //                  rest of the agent with an empty string to use for it.
+        gdata->property_java_vm_info = jvmtiAllocate(1);
+        gdata->property_java_vm_info[0] = '\0';
         gdata->property_java_class_path
                         = getPropertyUTF8(env, "java.class.path");
+        // ANDROID-CHANGED: Android uses java.boot.class.path to store the bootclasspath.
         gdata->property_sun_boot_class_path
-                        = getPropertyUTF8(env, "sun.boot.class.path");
+                        = getPropertyUTF8(env, "java.boot.class.path");
+        // ANDROID-CHANGED: Android uses java.library.path to store all library path information.
         gdata->property_sun_boot_library_path
-                        = getPropertyUTF8(env, "sun.boot.library.path");
+                        = getPropertyUTF8(env, "java.library.path");
         gdata->property_path_separator
                         = getPropertyUTF8(env, "path.separator");
         gdata->property_user_dir
