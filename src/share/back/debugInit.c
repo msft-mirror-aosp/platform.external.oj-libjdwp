@@ -60,6 +60,10 @@ static jrawMonitorID initMonitor;
 static jboolean initComplete;
 static jbyte currentSessionID;
 
+// ANDROID-CHANGED: We need to support OnAttach for android so use this to let other parts know that
+// we aren't fully initialized yet.
+static jboolean isInAttach = JNI_FALSE;
+
 /*
  * Options set through the OnLoad options string. All of these values
  * are set once at VM startup and never reset.
@@ -268,8 +272,9 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
         forceExit(1); /* Kill entire process, no core dump wanted */
     }
 
+    // ANDROID-CHANGED: Android uses java.library.path to store all library path information.
     JVMTI_FUNC_PTR(gdata->jvmti, GetSystemProperty)
-        (gdata->jvmti, (const char *)"sun.boot.library.path",
+        (gdata->jvmti, (const char *)"java.library.path",
          &boot_path);
 
     dbgsysBuildLibName(npt_lib, sizeof(npt_lib), boot_path, NPT_LIBNAME);
@@ -758,7 +763,10 @@ initialize(JNIEnv *env, jthread thread, EventIndex triggering_ei)
 
     suspendPolicy = suspendOnInit ? JDWP_SUSPEND_POLICY(ALL)
                                   : JDWP_SUSPEND_POLICY(NONE);
-    if (triggering_ei == EI_VM_INIT) {
+    // ANDROID-CHANGED: Don't send any event if we are actually in Agent_OnAttach.
+    if (isInAttach) {
+      // Do Nothing.
+    } else if (triggering_ei == EI_VM_INIT) {
         LOG_MISC(("triggering_ei == EI_VM_INIT"));
         eventHelper_reportVMInit(env, currentSessionID, thread, suspendPolicy);
     } else {
@@ -1346,4 +1354,54 @@ debugInit_exit(jvmtiError error, const char *msg)
 
     // Last chance to die, this kills the entire process.
     forceExit(EXIT_JVMTI_ERROR);
+}
+
+// ANDROID-CHANGED: Support jdwp loading with OnAttach.
+static jint doInitializeOnAttach(JavaVM* vm) {
+    JNIEnv* jnienv = NULL;
+    jvmtiError error = JVM_FUNC_PTR(vm,GetEnv)
+                (vm, (void **)&(jnienv), JNI_VERSION_1_6);
+    if (error != JNI_OK) {
+        ERROR_MESSAGE(("JDWP unable to access jni (0x%x),"
+                         " is your J2SE a 1.6 or newer version?"
+                         " JNIEnv's GetEnv() returned %d",
+                         JNI_VERSION_1_6, error));
+        return JNI_ERR;
+    }
+    jthread currentThread;
+    error = JVMTI_FUNC_PTR(gdata->jvmti,GetCurrentThread)
+                (gdata->jvmti, &currentThread);
+    if (error != JVMTI_ERROR_NONE) {
+        ERROR_MESSAGE(("JDWP unable to get current thread during agent attach: %s(%d)",
+                        jvmtiErrorText(error), error));
+        return JNI_ERR;
+    }
+    // Pretend to send the VM_INIT event.
+    cbEarlyVMInit(gdata->jvmti, jnienv, currentThread);
+    return JNI_OK;
+}
+
+/* OnAttach startup:
+ * ANDROID-CHANGED: We need this to support the way android normally uses debuggers.
+ */
+JNIEXPORT jint JNICALL
+Agent_OnAttach(JavaVM* vm, char* options, void* reserved)
+{
+    isInAttach = JNI_TRUE;
+    // SuspendOnInit should default to false in late-attach scenario since it is not supported.
+    suspendOnInit = JNI_FALSE;
+    if (Agent_OnLoad(vm, options, reserved) != JNI_OK) {
+        return JNI_ERR;
+    }
+    jint res;
+    if (suspendOnInit) {
+        ERROR_MESSAGE(("JDWP cannot suspend all threads when performing late-attach."));
+        return JNI_ERR;
+    } else if (!initOnUncaught && (initOnException == NULL)) {
+        res = doInitializeOnAttach(vm);
+    } else {
+        res = JNI_OK;
+    }
+    isInAttach = JNI_FALSE;
+    return res;
 }
