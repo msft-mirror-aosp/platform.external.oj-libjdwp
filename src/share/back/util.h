@@ -74,6 +74,15 @@ typedef struct RefNode {
 
 typedef jint FrameNumber;
 
+// ANDROID-CHANGED: support for DDMS extension apis.
+typedef jvmtiError (*DdmProcessChunk)(jvmtiEnv* jvmti,
+                                      jint type_in,
+                                      jint length_in,
+                                      const jbyte* data_in,
+                                      jint* type_out,
+                                      jint* length_out,
+                                      jbyte** data_out);
+
 typedef struct {
     jvmtiEnv *jvmti;
     JavaVM   *jvm;
@@ -135,6 +144,9 @@ typedef struct {
 
      /* Indication that the agent has been loaded */
      jboolean isLoaded;
+
+     /* ANDROID-CHANGED: com.android.art.internal.ddm.process_chunk extension function */
+     DdmProcessChunk ddm_process_chunk;
 
 } BackendGlobalData;
 
