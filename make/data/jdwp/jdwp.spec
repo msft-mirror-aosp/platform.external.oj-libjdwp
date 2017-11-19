@@ -3027,6 +3027,28 @@ JDWP "Java(tm) Debug Wire Protocol"
         )
     )
 )
+(CommandSet DDM=-57
+    "The extension commands for ddms. Note that this is equivalent to the uint8_t value '199'."
+    (Command Chunk = 1
+        "Returns the output of processing a DDMS chunk with any registered handlers. Note: When an error occurs or no data is returned no error code will be set and the reply will be empty.  This is for backwards compatibility."
+        (Out
+            (int ddms_type "The ddms type of the data that follows")
+            (Repeat ddms_data_length
+                (byte ddms_data "DDMS data to be processed by the handler registered for the given input_type.")
+            )
+        )
+        (Reply
+            (int ddms_type "The ddms type of the data that follows")
+            (Repeat ddms_data_length
+                (byte ddms_data "DDMS data returned from the handler")
+            )
+        )
+        (ErrorSet
+            (Error NOT_IMPLEMENTED "DDMS is not supported or set up.")
+            (Error VM_DEAD)
+        )
+    )
+)
 (ConstantSet Error
     (Constant NONE                   =0   "No error has occurred.")
     (Constant INVALID_THREAD         =10  "Passed thread is null, is not a valid thread or has exited.")
