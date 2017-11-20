@@ -194,6 +194,44 @@ compatible_versions(jint major_runtime,     jint minor_runtime,
            minor_runtime >= minor_compiletime;
 }
 
+// ANDROID-CHANGED: Function to get and set the com.android.art.internal.ddm.process_chunk extension
+// function. This returns JNI_ERR if something went wrong with searching. If the extension is not
+// found we return JNI_OK and don't bother updating the gdata pointer.
+static jint find_ddm_process_chunk()
+{
+    jvmtiError error;
+    jvmtiExtensionFunctionInfo* extension_info;
+    jint num_extensions;
+    jboolean found;
+    int i;
+    int j;
+
+    found = JNI_FALSE;
+    error = JVMTI_FUNC_PTR(gdata->jvmti,GetExtensionFunctions)
+            (gdata->jvmti, &num_extensions, &extension_info);
+    if (error != JVMTI_ERROR_NONE) {
+        ERROR_MESSAGE(("JDWP Unable to get jvmti extension functions: %s(%d)",
+                       jvmtiErrorText(error), error));
+        return JNI_ERR;
+    }
+    // We iterate through every extension function even once we found the one we want in order to
+    // clean them all up as we go.
+    for (i = 0; i < num_extensions; i++) {
+        if (strcmp("com.android.art.internal.ddm.process_chunk", extension_info[i].id) == 0) {
+            gdata->ddm_process_chunk = (DdmProcessChunk) extension_info[i].func;
+        }
+        jvmtiDeallocate(extension_info[i].id);
+        jvmtiDeallocate(extension_info[i].short_description);
+        for (j = 0; j < extension_info[i].param_count; j++) {
+            jvmtiDeallocate(extension_info[i].params[j].name);
+        }
+        jvmtiDeallocate(extension_info[i].params);
+        jvmtiDeallocate(extension_info[i].errors);
+    }
+    jvmtiDeallocate(extension_info);
+    return JNI_OK;
+}
+
 /* OnLoad startup:
  *   Returning JNI_ERR will cause the java_g VM to core dump, be careful.
  */
@@ -397,6 +435,13 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
     if (error != JVMTI_ERROR_NONE) {
         ERROR_MESSAGE(("JDWP unable to set JVMTI event callbacks: %s(%d)",
                         jvmtiErrorText(error), error));
+        return JNI_ERR;
+    }
+
+    // ANDROID-CHANGED: Find com.android.art.internal.ddm.process_chunk function if it exists.
+    if (find_ddm_process_chunk() != JNI_OK) {
+        ERROR_MESSAGE(("Fatal error while attempting to find the "
+                       "com.android.art.internal.ddm.process_chunk extension function"));
         return JNI_ERR;
     }
 
