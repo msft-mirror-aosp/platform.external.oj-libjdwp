@@ -630,6 +630,14 @@ jint
 uniqueID(void)
 {
     static jint currentID = 0;
+    // ANDROID-CHANGED: on android we sometimes need to share these id's with DDMS traffic that is
+    // multiplexed on the same connection. Since we don't have any way to know which id's are taken
+    // by DDMS we will instead partition the ids between them. All positive ids (sign-bit == 0) are
+    // reserved for libjdwp. DDMS will take ids with sign-bit == 1. This condition is not expected
+    // to ever be true on a normal debugging session.
+    if (currentID < 0) {
+      currentID = 0;
+    }
     return currentID++;
 }
 
