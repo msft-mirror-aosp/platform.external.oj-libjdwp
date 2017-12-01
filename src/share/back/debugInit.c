@@ -39,6 +39,9 @@
 #include "invoker.h"
 #include "sys.h"
 
+// ANDROID-CHANGED: Allow us to initialize VMDebug apis.
+#include "vmDebug.h"
+
 /* How the options get to OnLoad: */
 #define XDEBUG "-Xdebug"
 #define XRUN "-Xrunjdwp"
@@ -775,6 +778,9 @@ initialize(JNIEnv *env, jthread thread, EventIndex triggering_ei)
     debugDispatch_initialize();
     classTrack_initialize(env);
     debugLoop_initialize();
+
+    // ANDROID-CHANGED: Take over relevant VMDebug APIs.
+    vmDebug_initalize(env);
 
     initMonitor = debugMonitorCreate("JDWP Initialization Monitor");
 

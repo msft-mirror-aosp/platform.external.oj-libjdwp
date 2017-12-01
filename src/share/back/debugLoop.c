@@ -23,6 +23,9 @@
  * questions.
  */
 
+// ANDROID-CHANGED: Include stdatomic so we can safely update and read the lastDebuggerActivity.
+#include <stdatomic.h>
+
 #include "util.h"
 #include "transport.h"
 #include "debugLoop.h"
@@ -48,6 +51,17 @@ static jrawMonitorID cmdQueueLock;
 static jrawMonitorID vmDeathLock;
 static jboolean transportError;
 
+// ANDROID-CHANGED: The time the last debugger activity occurred or '0' if a debugger command is
+// currently in progress or the debugger has not started.
+static _Atomic(jlong) lastDebuggerActivity = ATOMIC_VAR_INIT(0LL);
+
+// ANDROID-CHANGED: Accessor for lastDebuggerActivity.
+jlong
+debugLoop_lastDebuggerActivity(void)
+{
+    return atomic_load(&lastDebuggerActivity);
+}
+
 static jboolean
 lastCommand(jdwpCmdPacket *cmd)
 {
@@ -64,6 +78,8 @@ void
 debugLoop_initialize(void)
 {
     vmDeathLock = debugMonitorCreate("JDWP VM_DEATH Lock");
+    // Android Changed: Set lastDebuggerActivity to 0 since we have not done anything yet.
+    atomic_store(&lastDebuggerActivity, 0LL);
 }
 
 void
@@ -133,6 +149,13 @@ debugLoop_run(void)
              */
             debugMonitorEnter(vmDeathLock);
 
+            // ANDROID-CHANGED: Set lastDebuggerActivity to zero to notify that we are doing
+            // debugger activity. We only do this if the cmdSet is not DDMS for historical reasons.
+            jboolean is_ddms = (cmd->cmdSet == JDWP_COMMAND_SET(DDM));
+            if (!is_ddms) {
+                atomic_store(&lastDebuggerActivity, 0LL);
+            }
+
             /* Initialize the input and output streams */
             inStream_init(&in, p);
             outStream_initReply(&out, inStream_id(&in));
@@ -157,6 +180,13 @@ debugLoop_run(void)
             } else {
                 /* Call the command handler */
                 replyToSender = func(&in, &out);
+            }
+
+            // ANDROID-CHANGED: Set lastDebuggerActivity to the current milli-time to notify VMDebug
+            // that we did something. We only do this if the cmdSet is not DDMS for historical
+            // reasons.
+            if (!is_ddms) {
+                atomic_store(&lastDebuggerActivity, milliTime());
             }
 
             /* Reply to the sender */
