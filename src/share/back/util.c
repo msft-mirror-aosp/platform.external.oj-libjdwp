@@ -24,6 +24,8 @@
  */
 
 #include <ctype.h>
+// ANDROID-CHANGED: Include time.h so we can use clock_gettime to implement milliTime.
+#include <time.h>
 
 #include "util.h"
 #include "transport.h"
@@ -40,6 +42,17 @@ BackendGlobalData *gdata = NULL;
 static jboolean isInterface(jclass clazz);
 static jboolean isArrayClass(jclass clazz);
 static char * getPropertyUTF8(JNIEnv *env, char *propertyName);
+
+// ANDROID-CHANGED: Implement a helper to get the current time in milliseconds according to
+// CLOCK_MONOTONIC.
+jlong
+milliTime(void)
+{
+  struct timespec now;
+  memset(&now, 0, sizeof(now));
+  (void)clock_gettime(CLOCK_MONOTONIC, &now);
+  return ((jlong)now.tv_sec) * 1000LL + ((jlong)now.tv_nsec) / 1000000LL;
+}
 
 /* Save an object reference for use later (create a NewGlobalRef) */
 void
