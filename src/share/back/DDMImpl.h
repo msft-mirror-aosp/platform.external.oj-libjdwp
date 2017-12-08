@@ -22,5 +22,7 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
 extern void *DDM_Cmds[];
 
+void DDM_onDisconnect(void);
