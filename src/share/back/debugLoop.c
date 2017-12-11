@@ -35,6 +35,9 @@
 #include "outStream.h"
 #include "threadControl.h"
 
+// ANDROID-CHANGED: Needed for DDM_onDisconnect
+#include "DDMImpl.h"
+
 
 static void JNICALL reader(jvmtiEnv* jvmti_env, JNIEnv* jni_env, void* arg);
 static void enqueue(jdwpPacket *p);
@@ -218,6 +221,9 @@ debugLoop_run(void)
      */
     transport_close();
     debugMonitorDestroy(cmdQueueLock);
+
+    // ANDROID-CHANGED: DDM needs to call some functions when we disconnect.
+    DDM_onDisconnect();
 
     /* Reset for a new connection to this VM if it's still alive */
     if ( ! gdata->vmDead ) {

@@ -23,10 +23,61 @@
  * questions.
  */
 
+#include <stdatomic.h>
+
 #include "util.h"
 #include "DDMImpl.h"
 #include "inStream.h"
 #include "outStream.h"
+
+static _Atomic(jboolean) ddmIsActive = ATOMIC_VAR_INIT(JNI_FALSE);
+
+static void
+SendDdmBroadcast(JNIEnv* env, jboolean connected)
+{
+  WITH_LOCAL_REFS(env, 2) {
+    jclass ddm_class = JNI_FUNC_PTR(env,FindClass)(env, "org/apache/harmony/dalvik/ddmc/DdmServer");
+    if (JNI_FUNC_PTR(env,ExceptionCheck)(env)) {
+      JNI_FUNC_PTR(env,ExceptionClear)(env);
+      goto end;
+    }
+    jmethodID broadcast = JNI_FUNC_PTR(env,GetStaticMethodID)(env, ddm_class, "broadcast", "(I)V");
+    if (broadcast == NULL) {
+      ERROR_MESSAGE(("JDWP Cannot find DdmServer.broadcast(I)V method!"));
+      JNI_FUNC_PTR(env,ExceptionDescribe)(env);
+      JNI_FUNC_PTR(env,ExceptionClear)(env);
+      goto end;
+    }
+    jint event =
+        connected == JNI_TRUE ? 1 /* DdmServer.CONNECTED */ : 2 /*DdmServer.DISCONNECTED */;
+    JNI_FUNC_PTR(env,CallStaticVoidMethod)(env, ddm_class, broadcast, event);
+    if (JNI_FUNC_PTR(env,ExceptionCheck)(env)) {
+      LOG_ERROR(("DdmServer.broadcast %d failed", event));
+      JNI_FUNC_PTR(env,ExceptionDescribe)(env);
+      JNI_FUNC_PTR(env,ExceptionClear)(env);
+    }
+    if (!connected) {
+      // If we are disconnecting we also need to call DdmVmInternal.threadNotify(false)
+      jclass ddm_vm_internal =
+          JNI_FUNC_PTR(env,FindClass)(env, "org/apache/harmony/dalvik/ddmc/DdmVmInternal");
+      jmethodID thread_notify =
+          JNI_FUNC_PTR(env,GetStaticMethodID)(env, ddm_vm_internal, "threadNotify", "(Z)V");
+      if (thread_notify == NULL) {
+        ERROR_MESSAGE(("JDWP Cannot find DdmVmInternal.threadNotify(Z)V method!"));
+        JNI_FUNC_PTR(env,ExceptionDescribe)(env);
+        JNI_FUNC_PTR(env,ExceptionClear)(env);
+        goto end;
+      }
+      JNI_FUNC_PTR(env,CallStaticVoidMethod)(env, ddm_vm_internal, thread_notify, JNI_FALSE);
+      if (JNI_FUNC_PTR(env,ExceptionCheck)(env)) {
+        LOG_ERROR(("DdmVmInternal.threadNotify(false) failed"));
+        JNI_FUNC_PTR(env,ExceptionDescribe)(env);
+        JNI_FUNC_PTR(env,ExceptionClear)(env);
+      }
+    }
+end: ;
+  } END_WITH_LOCAL_REFS(env);
+}
 
 static jboolean
 chunk(PacketInputStream *in, PacketOutputStream *out)
@@ -54,6 +105,11 @@ chunk(PacketInputStream *in, PacketOutputStream *out)
         return JNI_TRUE;
     }
 
+    jboolean ddm_newly_active = !atomic_exchange(&ddmIsActive, JNI_TRUE);
+    if (ddm_newly_active) {
+      SendDdmBroadcast(getEnv(), /* connected */JNI_TRUE);
+    }
+
     LOG_JVMTI(("com.android.art.internal.ddm.process_chunk()"));
     error = gdata->ddm_process_chunk(gdata->jvmti,
                                      type_in,
@@ -78,6 +134,15 @@ chunk(PacketInputStream *in, PacketOutputStream *out)
     jvmtiDeallocate(data_out);
 
     return JNI_TRUE;
+}
+
+void DDM_onDisconnect(void)
+{
+  jboolean was_active = atomic_exchange(&ddmIsActive, JNI_FALSE);
+  if (was_active) {
+    JNIEnv* env = getEnv();
+    SendDdmBroadcast(getEnv(), /*connected*/ JNI_FALSE);
+  }
 }
 
 void *DDM_Cmds[] = { (void *)1
