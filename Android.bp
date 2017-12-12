@@ -4,8 +4,6 @@ java_binary_host {
     wrapper: "etc/jdwpgen.sh",
     manifest: "etc/manifest.txt",
     java_version: "1.8",
-    // This shouldn't be needed: b/68397812
-    compile_multilib: "first",
 }
 
 genrule {

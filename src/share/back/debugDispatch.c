@@ -42,6 +42,7 @@
 #include "ArrayReferenceImpl.h"
 #include "EventRequestImpl.h"
 #include "StackFrameImpl.h"
+#include "DDMImpl.h"
 
 static void **l1Array;
 
@@ -94,11 +95,14 @@ debugDispatch_getHandler(int cmdSet, int cmd)
 {
     void **l2Array;
 
-    if (cmdSet > JDWP_HIGHEST_COMMAND_SET) {
+    // ANDROID-CHANGED: DDMS has cmdSet -57 (199u). Check for this one specifically.
+    if (cmdSet == JDWP_COMMAND_SET(DDM)) {
+        l2Array = (void **)DDM_Cmds;
+    } else if (cmdSet > JDWP_HIGHEST_COMMAND_SET || cmdSet < 0) {
         return NULL;
+    } else {
+        l2Array = (void **)l1Array[cmdSet];
     }
-
-    l2Array = (void **)l1Array[cmdSet];
 
     /*
      * If there is no such CommandSet or the Command

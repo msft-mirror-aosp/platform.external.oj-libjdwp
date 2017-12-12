@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,16 +23,6 @@
  * questions.
  */
 
-#ifndef JDWP_DEBUGLOOP_H
-#define JDWP_DEBUGLOOP_H
+extern void *DDM_Cmds[];
 
-void debugLoop_initialize(void);
-void debugLoop_run(void);
-void debugLoop_sync(void);
-
-// ANDROID-CHANGED: getter for last debugger activity time. Value is the CLOCK_MONOTONIC
-// millisecond time the last debugger action completed or 0 if a debugger action is ongoing.
-// A debugger action is any JDWP command packet (except for those in JDWP_COMMAND_SET(DDM)).
-jlong debugLoop_lastDebuggerActivity(void);
-
-#endif
+void DDM_onDisconnect(void);
