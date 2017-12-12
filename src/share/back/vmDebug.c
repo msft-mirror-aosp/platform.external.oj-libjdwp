@@ -23,6 +23,8 @@
  * questions.
  */
 
+#include <stdatomic.h>
+
 #include "vmDebug.h"
 
 #include "JDWP.h"
@@ -30,10 +32,42 @@
 #include "transport.h"
 #include "util.h"
 
+static _Atomic(jlong) lastDebuggerActivity = ATOMIC_VAR_INIT(0LL);
+static _Atomic(jboolean) hasSeenDebuggerActivity = ATOMIC_VAR_INIT(JNI_FALSE);
+
+// Reset the tracking variables.
+void vmDebug_onDisconnect()
+{
+    atomic_store(&lastDebuggerActivity, 0LL);
+    atomic_store(&hasSeenDebuggerActivity, JNI_FALSE);
+}
+
+// Mark us as having seen actual debugger activity (so isDebuggerConnected can return true) and that
+// we are currently doing something as the debugger.
+void vmDebug_notifyDebuggerActivityStart()
+{
+    atomic_store(&lastDebuggerActivity, 0LL);
+    atomic_store(&hasSeenDebuggerActivity, JNI_TRUE);
+}
+
+// Update the timestamp for the last debugger activity.
+void vmDebug_notifyDebuggerActivityEnd()
+{
+    atomic_store(&lastDebuggerActivity, milliTime());
+}
+
+// For backwards compatibility we are only considered 'connected' as far as VMDebug is concerned if
+// we have gotten at least one non-ddms JDWP packet.
+static jboolean
+isDebuggerConnected()
+{
+    return transport_is_open() && atomic_load(&hasSeenDebuggerActivity);
+}
+
 static jboolean JNICALL
 VMDebug_isDebuggerConnected(JNIEnv* env, jclass klass)
 {
-    return transport_is_open();
+    return isDebuggerConnected();
 }
 
 static jboolean JNICALL
@@ -46,11 +80,11 @@ VMDebug_isDebuggingEnabled(JNIEnv* env, jclass klass)
 static jlong JNICALL
 VMDebug_lastDebuggerActivity(JNIEnv* env, jclass klass)
 {
-    if (!transport_is_open()) {
+    if (!isDebuggerConnected()) {
         LOG_ERROR(("VMDebug.lastDebuggerActivity called without active debugger"));
         return -1;
     }
-    jlong last_time = debugLoop_lastDebuggerActivity();
+    jlong last_time = atomic_load(&lastDebuggerActivity);
     if (last_time == 0) {
         LOG_MISC(("debugger is performing an action"));
         return 0;
