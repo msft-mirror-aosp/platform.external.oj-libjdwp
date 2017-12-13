@@ -23,9 +23,6 @@
  * questions.
  */
 
-// ANDROID-CHANGED: Include stdatomic so we can safely update and read the lastDebuggerActivity.
-#include <stdatomic.h>
-
 #include "util.h"
 #include "transport.h"
 #include "debugLoop.h"
@@ -37,6 +34,9 @@
 
 // ANDROID-CHANGED: Needed for DDM_onDisconnect
 #include "DDMImpl.h"
+// ANDROID-CHANGED: Needed for vmDebug_onDisconnect, vmDebug_notifyDebuggerActivityStart &
+// vmDebug_notifyDebuggerActivityEnd.
+#include "vmDebug.h"
 
 
 static void JNICALL reader(jvmtiEnv* jvmti_env, JNIEnv* jni_env, void* arg);
@@ -54,17 +54,6 @@ static jrawMonitorID cmdQueueLock;
 static jrawMonitorID vmDeathLock;
 static jboolean transportError;
 
-// ANDROID-CHANGED: The time the last debugger activity occurred or '0' if a debugger command is
-// currently in progress or the debugger has not started.
-static _Atomic(jlong) lastDebuggerActivity = ATOMIC_VAR_INIT(0LL);
-
-// ANDROID-CHANGED: Accessor for lastDebuggerActivity.
-jlong
-debugLoop_lastDebuggerActivity(void)
-{
-    return atomic_load(&lastDebuggerActivity);
-}
-
 static jboolean
 lastCommand(jdwpCmdPacket *cmd)
 {
@@ -81,8 +70,6 @@ void
 debugLoop_initialize(void)
 {
     vmDeathLock = debugMonitorCreate("JDWP VM_DEATH Lock");
-    // Android Changed: Set lastDebuggerActivity to 0 since we have not done anything yet.
-    atomic_store(&lastDebuggerActivity, 0LL);
 }
 
 void
@@ -152,11 +139,11 @@ debugLoop_run(void)
              */
             debugMonitorEnter(vmDeathLock);
 
-            // ANDROID-CHANGED: Set lastDebuggerActivity to zero to notify that we are doing
-            // debugger activity. We only do this if the cmdSet is not DDMS for historical reasons.
+            // ANDROID-CHANGED: Tell vmDebug we have started doing some debugger activity. We only
+            // do this if the cmdSet is not DDMS for historical reasons.
             jboolean is_ddms = (cmd->cmdSet == JDWP_COMMAND_SET(DDM));
             if (!is_ddms) {
-                atomic_store(&lastDebuggerActivity, 0LL);
+                vmDebug_notifyDebuggerActivityStart();
             }
 
             /* Initialize the input and output streams */
@@ -185,11 +172,9 @@ debugLoop_run(void)
                 replyToSender = func(&in, &out);
             }
 
-            // ANDROID-CHANGED: Set lastDebuggerActivity to the current milli-time to notify VMDebug
-            // that we did something. We only do this if the cmdSet is not DDMS for historical
-            // reasons.
+            // ANDROID-CHANGED: Tell vmDebug we are done with the current debugger activity.
             if (!is_ddms) {
-                atomic_store(&lastDebuggerActivity, milliTime());
+                vmDebug_notifyDebuggerActivityEnd();
             }
 
             /* Reply to the sender */
@@ -222,6 +207,8 @@ debugLoop_run(void)
     transport_close();
     debugMonitorDestroy(cmdQueueLock);
 
+    // ANDROID-CHANGED: Tell vmDebug we have disconnected.
+    vmDebug_onDisconnect();
     // ANDROID-CHANGED: DDM needs to call some functions when we disconnect.
     DDM_onDisconnect();
 
