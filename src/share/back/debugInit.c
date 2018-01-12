@@ -58,6 +58,10 @@
     #define DEFAULT_LOGFILE             NULL
 #endif
 
+// ANDROID-CHANGED: Special Art Version to get an ArtTiEnv. This has the same basic api as a
+// jvmtiEnv but generally has a caveat that everything is best effort.
+#define ART_TI_VERSION_1_2 (JVMTI_VERSION_1_2 | 0x40000000)
+
 static jboolean vmInitialized;
 static jrawMonitorID initMonitor;
 static jboolean initComplete;
@@ -278,11 +282,23 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
     /* Get the JVMTI Env, IMPORTANT: Do this first! For jvmtiAllocate(). */
     error = JVM_FUNC_PTR(vm,GetEnv)
                 (vm, (void **)&(gdata->jvmti), JVMTI_VERSION_1);
+    // ANDROID-CHANGED: Check for ART_TI_VERSION_1_2 if we cannot get real JVMTI. This is done only
+    // to support the userdebug debug-anything behavior.
     if (error != JNI_OK) {
         ERROR_MESSAGE(("JDWP unable to access JVMTI Version 1 (0x%x),"
-                         " is your J2SE a 1.5 or newer version?"
+                         " retrying using ART_TI instead since this might be a userdebug device."
                          " JNIEnv's GetEnv() returned %d",
                          JVMTI_VERSION_1, error));
+        // Try to get an ArtTiEnv instead
+        error = JVM_FUNC_PTR(vm,GetEnv)
+                    (vm, (void **)&(gdata->jvmti), ART_TI_VERSION_1_2);
+    }
+    if (error != JNI_OK) {
+        ERROR_MESSAGE(("JDWP unable to access either JVMTI Version 1 (0x%x)"
+                         " or ART_TI_VERSION_1_2 (0x%x),"
+                         " is your J2SE a 1.5 or newer version?"
+                         " JNIEnv's GetEnv() returned %d",
+                         JVMTI_VERSION_1, ART_TI_VERSION_1_2, error));
         forceExit(1); /* Kill entire process, no core dump */
     }
 
