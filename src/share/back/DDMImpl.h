@@ -25,4 +25,5 @@
 
 extern void *DDM_Cmds[];
 
+void DDM_initialize(void);
 void DDM_onDisconnect(void);
