@@ -136,6 +136,11 @@ chunk(PacketInputStream *in, PacketOutputStream *out)
     return JNI_TRUE;
 }
 
+void DDM_initialize(void)
+{
+  atomic_exchange(&ddmIsActive, gdata->ddmInitiallyActive);
+}
+
 void DDM_onDisconnect(void)
 {
   jboolean was_active = atomic_exchange(&ddmIsActive, JNI_FALSE);
