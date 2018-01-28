@@ -148,6 +148,9 @@ typedef struct {
      /* ANDROID-CHANGED: com.android.art.internal.ddm.process_chunk extension function */
      DdmProcessChunk ddm_process_chunk;
 
+     /* ANDROID-CHANGED: Need to keep track of if ddm is initially active. */
+     jboolean ddmInitiallyActive;
+
 } BackendGlobalData;
 
 extern BackendGlobalData * gdata;

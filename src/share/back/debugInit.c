@@ -39,8 +39,9 @@
 #include "invoker.h"
 #include "sys.h"
 
-// ANDROID-CHANGED: Allow us to initialize VMDebug apis.
+// ANDROID-CHANGED: Allow us to initialize VMDebug & ddms apis.
 #include "vmDebug.h"
+#include "DDMImpl.h"
 
 /* How the options get to OnLoad: */
 #define XDEBUG "-Xdebug"
@@ -795,6 +796,9 @@ initialize(JNIEnv *env, jthread thread, EventIndex triggering_ei)
     classTrack_initialize(env);
     debugLoop_initialize();
 
+    // ANDROID-CHANGED: Set up DDM
+    DDM_initialize();
+
     // ANDROID-CHANGED: Take over relevant VMDebug APIs.
     vmDebug_initalize(env);
 
@@ -1105,6 +1109,8 @@ parseOptions(char *options)
     gdata->assertOn     = DEFAULT_ASSERT_ON;
     gdata->assertFatal  = DEFAULT_ASSERT_FATAL;
     logfile             = DEFAULT_LOGFILE;
+    // ANDROID-CHANGED: By default we assume ddms is off initially.
+    gdata->ddmInitiallyActive = JNI_FALSE;
 
     /* Options being NULL will end up being an error. */
     if (options == NULL) {
@@ -1304,6 +1310,11 @@ parseOptions(char *options)
             }
         } else if ( strcmp(buf, "stdalloc")==0 ) { /* Obsolete, but accept it */
             if ( !get_boolean(&str, &useStandardAlloc) ) {
+                goto syntax_error;
+            }
+        // ANDROID-CHANGED: Need to be able to tell if ddm is initially running.
+        } else if ( strcmp(buf, "ddm_already_active")==0 ) {
+            if ( !get_boolean(&str, &(gdata->ddmInitiallyActive)) ) {
                 goto syntax_error;
             }
         } else {
