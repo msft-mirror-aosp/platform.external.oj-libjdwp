@@ -1768,8 +1768,10 @@ isMethodObsolete(jmethodID method)
     return obsolete;
 }
 
-/* Get the jvmti environment to be used with tags */
-static jvmtiEnv *
+/* Get the jvmti environment to be used with tags
+ * ANDROID_CHANGED: Expose this function publicly for use with class-track and other places.
+ */
+jvmtiEnv *
 getSpecialJvmti(void)
 {
     jvmtiEnv  *jvmti;
