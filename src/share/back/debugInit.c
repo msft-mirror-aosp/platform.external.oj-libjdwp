@@ -204,10 +204,11 @@ compatible_versions(jint major_runtime,     jint minor_runtime,
            minor_runtime >= minor_compiletime;
 }
 
-// ANDROID-CHANGED: Function to get and set the com.android.art.internal.ddm.process_chunk extension
-// function. This returns JNI_ERR if something went wrong with searching. If the extension is not
-// found we return JNI_OK and don't bother updating the gdata pointer.
-static jint find_ddm_process_chunk()
+// ANDROID-CHANGED: Function to get and set the com.android.art.internal.ddm.process_chunk and
+// com.android.art.concurrent.raw_monitor_enter_no_suspend extension functions. This returns JNI_ERR
+// if something went wrong with searching. If the extension is not found we return JNI_OK and don't
+// bother updating the gdata pointer.
+static jint find_extension_functions()
 {
     jvmtiError error;
     jvmtiExtensionFunctionInfo* extension_info;
@@ -229,6 +230,10 @@ static jint find_ddm_process_chunk()
     for (i = 0; i < num_extensions; i++) {
         if (strcmp("com.android.art.internal.ddm.process_chunk", extension_info[i].id) == 0) {
             gdata->ddm_process_chunk = (DdmProcessChunk) extension_info[i].func;
+        }
+        if (strcmp("com.android.art.concurrent.raw_monitor_enter_no_suspend",
+                   extension_info[i].id) == 0) {
+            gdata->raw_monitor_enter_no_suspend = (RawMonitorEnterNoSuspend) extension_info[i].func;
         }
         jvmtiDeallocate(extension_info[i].id);
         jvmtiDeallocate(extension_info[i].short_description);
@@ -384,6 +389,8 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
     needed_capabilities.can_maintain_original_method_order      = 1;
     needed_capabilities.can_generate_monitor_events             = 1;
     needed_capabilities.can_tag_objects                         = 1;
+    /* ANDROID-CHANGED: Needed for how we implement commonRef tracking */
+    needed_capabilities.can_generate_object_free_events         = 1;
 
     /* And what potential ones that would be nice to have */
     needed_capabilities.can_force_early_return
@@ -461,7 +468,7 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
     }
 
     // ANDROID-CHANGED: Find com.android.art.internal.ddm.process_chunk function if it exists.
-    if (find_ddm_process_chunk() != JNI_OK) {
+    if (find_extension_functions() != JNI_OK || gdata->raw_monitor_enter_no_suspend == NULL) {
         ERROR_MESSAGE(("Fatal error while attempting to find the "
                        "com.android.art.internal.ddm.process_chunk extension function"));
         return JNI_ERR;
