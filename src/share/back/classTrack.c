@@ -42,23 +42,28 @@
  * associated with the tag we gave to that class. The tag is
  * simply incremented every time we add a new class.
  *
- * When we compare with the previous set of classes we iterate
- * through the list and remove any nodes which have no objects
- * associated with their tag, reporting these as the classes
- * that have been unloaded.
+ * We also request (on the separate tracking jvmtiEnv) an
+ * ObjectFree event be called for each of these classes. This
+ * allows us to keep a running list of all the classes known to
+ * have been collected since the last call to
+ * classTrack_processUnloads. On each call to processUnloads we
+ * iterate through this list and remove from the main list all
+ * the objects that have been collected. We then return a list of
+ * the class-signatures that have been collected.
  *
  * For efficiency and simplicity we don't bother retagging or
  * re-using old tags, instead relying on the fact that no
  * program will ever be able to exhaust the (2^64 - 1) possible
  * tag values (which would require that many class-loads).
  *
- * This relies on the tagging implementation being relatively
- * efficient for performance. It has the advantage of not
- * requiring any jweaks.
+ * This relies on the tagging and ObjectFree implementation being
+ * relatively efficient for performance. It has the advantage of
+ * not requiring any jweaks.
  *
  * All calls into any function of this module must be either
  * done before the event-handler system is setup or done while
- * holding the event handlerLock.
+ * holding the event handlerLock. The list of freed classes is
+ * protected by the classTagLock.
  */
 
 #include "util.h"
@@ -89,57 +94,47 @@ static jvmtiEnv *trackingEnv;
 static jlong currentKlassTag;
 
 /*
- * Delete a linked-list of classes.
- * The signatures of classes in the table are returned.
+ * A lock to protect access to 'deletedTagBag'
  */
-static struct bag *
-deleteList(KlassNode *node)
+static jrawMonitorID deletedTagLock;
+
+/*
+ * A bag containing all the deleted klass_tags ids. This must be accessed under the
+ * deletedTagLock.
+ *
+ * It is cleared each time classTrack_processUnloads is called.
+ */
+struct bag* deletedTagBag;
+
+/*
+ * The callback for when classes are freed. Only classes are called because this is registered with
+ * the trackingEnv which only tags classes.
+ */
+static void JNICALL
+cbTrackingObjectFree(jvmtiEnv* jvmti_env, jlong tag)
 {
-    struct bag *signatures = bagCreateBag(sizeof(char*), 10);
-    jint slot;
-
-    if (signatures == NULL) {
-        EXIT_ERROR(AGENT_ERROR_OUT_OF_MEMORY,"signatures");
-    }
-
-    while (node != NULL) {
-        KlassNode *next;
-        char **sigSpot;
-
-        /* Add signature to the signature bag */
-        sigSpot = bagAdd(signatures);
-        if (sigSpot == NULL) {
-            EXIT_ERROR(AGENT_ERROR_OUT_OF_MEMORY,"signature bag");
-        }
-        *sigSpot = node->signature;
-
-        /* No need to delete the tag since the object was already destroyed. */
-        next = node->next;
-        jvmtiDeallocate(node);
-
-        node = next;
-    }
-
-    return signatures;
+    debugMonitorEnter(deletedTagLock);
+    *(jlong*)bagAdd(deletedTagBag) = tag;
+    debugMonitorExit(deletedTagLock);
 }
 
+/*
+ * Returns true (thus continuing the iteration) if the item is not the searched for tag.
+ */
 static jboolean
-isClassUnloaded(jlong tag) {
-    jvmtiError error;
-    jint res_count;
-    error = JVMTI_FUNC_PTR(trackingEnv,GetObjectsWithTags)(trackingEnv,
-                                                           /*tag_count*/ 1,
-                                                           &tag,
-                                                           &res_count,
-                                                           /*object_result_ptr*/ NULL,
-                                                           /*tag_result_ptr*/ NULL);
-    if (error != JVMTI_ERROR_NONE) {
-        EXIT_ERROR(error,"Failed GetObjectsWithTags for class tracking");
-    }
-    if (res_count != 0 && res_count != 1) {
-        EXIT_ERROR(AGENT_ERROR_INTERNAL,"Unexpected extra tags in trackingEnv!");
-    }
-    return res_count == 0 ? JNI_TRUE : JNI_FALSE;
+isNotTag(void* item, void* needle)
+{
+    return *(jlong*)item != *(jlong*)needle;
+}
+
+/*
+ * This requires that deletedTagLock and the handlerLock are both held.
+ */
+static jboolean
+isClassUnloaded(jlong tag)
+{
+    /* bagEnumerateOver returns true if 'func' returns true on all items and aborts early if not. */
+    return !bagEnumerateOver(deletedTagBag, isNotTag, &tag);
 }
 
 /*
@@ -156,31 +151,48 @@ isClassUnloaded(jlong tag) {
 struct bag *
 classTrack_processUnloads(JNIEnv *env)
 {
-    KlassNode *toDeleteList = NULL;
-    jboolean anyRemoved = JNI_FALSE;
-    KlassNode* node = list;
-    KlassNode** previousNext = &list;
-    /* Filter out all the unloaded classes from the list. */
-    while (node != NULL) {
-        if (isClassUnloaded(node->klass_tag)) {
-            /* Update the previous node's next pointer to point after this node. Note that we update
-             * the value pointed to by previousNext but not the value of previousNext itself.
-             */
-            *previousNext = node->next;
-            /* Remove this node from the 'list' and put it into toDeleteList */
-            node->next = toDeleteList;
-            toDeleteList = node;
-            anyRemoved = JNI_TRUE;
-        } else {
-            /* This node will become the previous node so update the previousNext pointer to this
-             * nodes next pointer.
-             */
-            previousNext = &(node->next);
-        }
-        node = *previousNext;
-    }
+    /* We could optimize this somewhat by holding the deletedTagLock for a much shorter time,
+     * replacing it as soon as we enter and then destroying it once we are done with it. This will
+     * cause a lot of memory churn and this function is not expected to be called that often.
+     * Furthermore due to the check for an empty bag (which should be very common) normally this
+     * will finish very quickly. In cases where there is a concurrent GC occuring and a class is
+     * being collected the GC-ing threads could be blocked until we are done but this is expected to
+     * be very rare.
+     */
+    debugMonitorEnter(deletedTagLock);
+    /* Take and return the deletedTagBag */
+    struct bag* deleted = bagCreateBag(sizeof(char*), bagSize(deletedTagBag));
+    /* The deletedTagBag is going to be much shorter than the klassNode list so we should walk the
+     * KlassNode list once and scan the deletedTagBag each time. We only need to this in the rare
+     * case that there was anything deleted though.
+     */
+    if (bagSize(deletedTagBag) != 0) {
+        KlassNode* node = list;
+        KlassNode** previousNext = &list;
 
-    return deleteList(toDeleteList);
+        while (node != NULL) {
+            if (isClassUnloaded(node->klass_tag)) {
+                /* Update the previous node's next pointer to point after this node. Note that we
+                 * update the value pointed to by previousNext but not the value of previousNext
+                 * itself.
+                 */
+                *previousNext = node->next;
+                /* Put this nodes signature into the deleted bag */
+                *(char**)bagAdd(deleted) = node->signature;
+                /* Deallocate the node */
+                jvmtiDeallocate(node);
+            } else {
+                /* This node will become the previous node so update the previousNext pointer to
+                 * this nodes next pointer.
+                 */
+                previousNext = &(node->next);
+            }
+            node = *previousNext;
+        }
+        bagDeleteAll(deletedTagBag);
+    }
+    debugMonitorExit(deletedTagLock);
+    return deleted;
 }
 
 /*
@@ -227,6 +239,31 @@ classTrack_addPreparedClass(JNIEnv *env, jclass klass)
     list = node;
 }
 
+static jboolean
+setupEvents()
+{
+    jvmtiCapabilities caps;
+    memset(&caps, 0, sizeof(caps));
+    caps.can_generate_object_free_events = 1;
+    jvmtiError error = JVMTI_FUNC_PTR(trackingEnv,AddCapabilities)(trackingEnv, &caps);
+    if (error != JVMTI_ERROR_NONE) {
+        return JNI_FALSE;
+    }
+    jvmtiEventCallbacks cb;
+    memset(&cb, 0, sizeof(cb));
+    cb.ObjectFree = cbTrackingObjectFree;
+    error = JVMTI_FUNC_PTR(trackingEnv,SetEventCallbacks)(trackingEnv, &cb, sizeof(cb));
+    if (error != JVMTI_ERROR_NONE) {
+        return JNI_FALSE;
+    }
+    error = JVMTI_FUNC_PTR(trackingEnv,SetEventNotificationMode)
+            (trackingEnv, JVMTI_ENABLE, JVMTI_EVENT_OBJECT_FREE, NULL);
+    if (error != JVMTI_ERROR_NONE) {
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
+}
+
 /*
  * Called once to build the initial prepared class hash table.
  */
@@ -237,6 +274,15 @@ classTrack_initialize(JNIEnv *env)
     trackingEnv = getSpecialJvmti();
     if ( trackingEnv == NULL ) {
         EXIT_ERROR(AGENT_ERROR_INTERNAL,"Failed to allocate tag-tracking jvmtiEnv");
+    }
+    /* We want to create these before turning on the events or tagging anything. */
+    deletedTagLock = debugMonitorCreate("Deleted class tag lock");
+    deletedTagBag = bagCreateBag(sizeof(jlong), 10);
+    /* ANDROID-CHANGED: Setup the trackingEnv's ObjectFree event */
+    if (!setupEvents()) {
+        /* On android classes are usually not unloaded too often so this is not a huge loss. */
+        ERROR_MESSAGE(("Unable to setup class ObjectFree tracking! Class unloads will not "
+                       "be reported!"));
     }
     currentKlassTag = 0l;
     list = NULL;
