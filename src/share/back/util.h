@@ -148,6 +148,9 @@ typedef struct {
      /* ANDROID-CHANGED: com.android.art.internal.ddm.process_chunk extension function */
      DdmProcessChunk ddm_process_chunk;
 
+     /* ANDROID-CHANGED: Need to keep track of if ddm is initially active. */
+     jboolean ddmInitiallyActive;
+
 } BackendGlobalData;
 
 extern BackendGlobalData * gdata;
@@ -443,5 +446,10 @@ void createLocalRefSpace(JNIEnv *env, jint capacity);
 
 void saveGlobalRef(JNIEnv *env, jobject obj, jobject *pobj);
 void tossGlobalRef(JNIEnv *env, jobject *pobj);
+
+/* ANDROID_CHANGED: Expose this method publicly.
+ * This returns a newly allocated jvmtiEnv* with the can_tag_objects capability.
+ */
+jvmtiEnv *getSpecialJvmti(void);
 
 #endif

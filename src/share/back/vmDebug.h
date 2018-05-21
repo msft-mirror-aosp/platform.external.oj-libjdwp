@@ -29,6 +29,9 @@
 #define JDWP_VMDEBUG_H
 
 void vmDebug_initalize(JNIEnv* env);
+void vmDebug_notifyDebuggerActivityStart(void);
+void vmDebug_notifyDebuggerActivityEnd(void);
+void vmDebug_onDisconnect(void);
 
 #endif
 

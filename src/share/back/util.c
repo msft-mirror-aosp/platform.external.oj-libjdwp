@@ -1768,8 +1768,10 @@ isMethodObsolete(jmethodID method)
     return obsolete;
 }
 
-/* Get the jvmti environment to be used with tags */
-static jvmtiEnv *
+/* Get the jvmti environment to be used with tags
+ * ANDROID_CHANGED: Expose this function publicly for use with class-track and other places.
+ */
+jvmtiEnv *
 getSpecialJvmti(void)
 {
     jvmtiEnv  *jvmti;
@@ -1779,8 +1781,10 @@ getSpecialJvmti(void)
     /* Get one time use JVMTI Env */
     jvmtiCapabilities caps;
 
+    // ANDROID-CHANGED: Always get a new jvmti-env using the same version as the main env. This
+    // means that everything will still work even when using a best-effort ArtTiEnv.
     rc = JVM_FUNC_PTR(gdata->jvm,GetEnv)
-                     (gdata->jvm, (void **)&jvmti, JVMTI_VERSION_1);
+                     (gdata->jvm, (void **)&jvmti, jvmtiVersion());
     if (rc != JNI_OK) {
         return NULL;
     }

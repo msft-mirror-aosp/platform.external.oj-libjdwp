@@ -39,8 +39,9 @@
 #include "invoker.h"
 #include "sys.h"
 
-// ANDROID-CHANGED: Allow us to initialize VMDebug apis.
+// ANDROID-CHANGED: Allow us to initialize VMDebug & ddms apis.
 #include "vmDebug.h"
+#include "DDMImpl.h"
 
 /* How the options get to OnLoad: */
 #define XDEBUG "-Xdebug"
@@ -57,6 +58,10 @@
     #define DEFAULT_ASSERT_FATAL        JNI_FALSE
     #define DEFAULT_LOGFILE             NULL
 #endif
+
+// ANDROID-CHANGED: Special Art Version to get an ArtTiEnv. This has the same basic api as a
+// jvmtiEnv but generally has a caveat that everything is best effort.
+#define ART_TI_VERSION_1_2 (JVMTI_VERSION_1_2 | 0x40000000)
 
 static jboolean vmInitialized;
 static jrawMonitorID initMonitor;
@@ -278,11 +283,23 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
     /* Get the JVMTI Env, IMPORTANT: Do this first! For jvmtiAllocate(). */
     error = JVM_FUNC_PTR(vm,GetEnv)
                 (vm, (void **)&(gdata->jvmti), JVMTI_VERSION_1);
+    // ANDROID-CHANGED: Check for ART_TI_VERSION_1_2 if we cannot get real JVMTI. This is done only
+    // to support the userdebug debug-anything behavior.
     if (error != JNI_OK) {
         ERROR_MESSAGE(("JDWP unable to access JVMTI Version 1 (0x%x),"
-                         " is your J2SE a 1.5 or newer version?"
+                         " retrying using ART_TI instead since this might be a userdebug device."
                          " JNIEnv's GetEnv() returned %d",
                          JVMTI_VERSION_1, error));
+        // Try to get an ArtTiEnv instead
+        error = JVM_FUNC_PTR(vm,GetEnv)
+                    (vm, (void **)&(gdata->jvmti), ART_TI_VERSION_1_2);
+    }
+    if (error != JNI_OK) {
+        ERROR_MESSAGE(("JDWP unable to access either JVMTI Version 1 (0x%x)"
+                         " or ART_TI_VERSION_1_2 (0x%x),"
+                         " is your J2SE a 1.5 or newer version?"
+                         " JNIEnv's GetEnv() returned %d",
+                         JVMTI_VERSION_1, ART_TI_VERSION_1_2, error));
         forceExit(1); /* Kill entire process, no core dump */
     }
 
@@ -779,6 +796,9 @@ initialize(JNIEnv *env, jthread thread, EventIndex triggering_ei)
     classTrack_initialize(env);
     debugLoop_initialize();
 
+    // ANDROID-CHANGED: Set up DDM
+    DDM_initialize();
+
     // ANDROID-CHANGED: Take over relevant VMDebug APIs.
     vmDebug_initalize(env);
 
@@ -1089,6 +1109,8 @@ parseOptions(char *options)
     gdata->assertOn     = DEFAULT_ASSERT_ON;
     gdata->assertFatal  = DEFAULT_ASSERT_FATAL;
     logfile             = DEFAULT_LOGFILE;
+    // ANDROID-CHANGED: By default we assume ddms is off initially.
+    gdata->ddmInitiallyActive = JNI_FALSE;
 
     /* Options being NULL will end up being an error. */
     if (options == NULL) {
@@ -1288,6 +1310,11 @@ parseOptions(char *options)
             }
         } else if ( strcmp(buf, "stdalloc")==0 ) { /* Obsolete, but accept it */
             if ( !get_boolean(&str, &useStandardAlloc) ) {
+                goto syntax_error;
+            }
+        // ANDROID-CHANGED: Need to be able to tell if ddm is initially running.
+        } else if ( strcmp(buf, "ddm_already_active")==0 ) {
+            if ( !get_boolean(&str, &(gdata->ddmInitiallyActive)) ) {
                 goto syntax_error;
             }
         } else {
