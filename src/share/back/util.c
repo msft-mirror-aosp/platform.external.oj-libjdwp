@@ -40,7 +40,6 @@ BackendGlobalData *gdata = NULL;
 
 /* Forward declarations */
 static jboolean isInterface(jclass clazz);
-static jboolean isArrayClass(jclass clazz);
 static char * getPropertyUTF8(JNIEnv *env, char *propertyName);
 
 // ANDROID-CHANGED: Implement a helper to get the current time in milliseconds according to
@@ -1312,7 +1311,8 @@ classStatus(jclass clazz)
     return status;
 }
 
-static jboolean
+/* ANDROID-CHANGED: Make isArrayClass public */
+jboolean
 isArrayClass(jclass clazz)
 {
     jboolean isArray = JNI_FALSE;
