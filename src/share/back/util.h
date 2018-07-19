@@ -390,6 +390,9 @@ jthread *allThreads(jint *count);
 
 void threadGroupInfo(jthreadGroup, jvmtiThreadGroupInfo *info);
 
+/* ANDROID-CHANGED: Add isArrayClass */
+jboolean isArrayClass(jclass);
+
 char *getClassname(jclass);
 jvmtiError classSignature(jclass, char**, char**);
 jint classStatus(jclass);
