@@ -89,6 +89,8 @@ static char *launchOnInit = NULL;           /* launch this app during init */
 static jboolean suspendOnInit = JNI_TRUE;   /* suspend all app threads after init */
 static jboolean dopause = JNI_FALSE;        /* pause for debugger attach */
 static jboolean docoredump = JNI_FALSE;     /* core dump on exit */
+/* ANDROID-CHANGED: Added directlog option */
+static jboolean directlog = JNI_FALSE;      /* Don't add pid to logfile. */
 static char *logfile = NULL;                /* Name of logfile (if logging) */
 static unsigned logflags = 0;               /* Log flags */
 
@@ -1003,6 +1005,8 @@ printUsage(void)
  "pause=y|n                    pause to debug PID                n\n"
  "coredump=y|n                 coredump at exit                  n\n"
  "errorexit=y|n                exit on any error                 n\n"
+ /* ANDROID-CHANGED: Added directlog */
+ "directlog                    do not add pid to name of logfile n\n"
  "logfile=filename             name of log file                  none\n"
  "logflags=flags               log flags (bitmask)               none\n"
  "                               JVM calls     = 0x001\n"
@@ -1108,6 +1112,8 @@ parseOptions(char *options)
     /* Set defaults */
     gdata->assertOn     = DEFAULT_ASSERT_ON;
     gdata->assertFatal  = DEFAULT_ASSERT_FATAL;
+    /* ANDROID-CHANGED: Add directlog */
+    directlog           = JNI_FALSE;
     logfile             = DEFAULT_LOGFILE;
     // ANDROID-CHANGED: By default we assume ddms is off initially.
     gdata->ddmInitiallyActive = JNI_FALSE;
@@ -1263,6 +1269,12 @@ parseOptions(char *options)
         } else if (strcmp(buf, "precrash") == 0) {
             errmsg = "The precrash option removed, use -XX:OnError";
             goto bad_option_with_errmsg;
+        } else if (strcmp(buf, "directlog") == 0) {
+            /* ANDROID-CHANGED: Added directlog */
+            /*LINTED*/
+            if ( !get_boolean(&str, &directlog) ) {
+                goto syntax_error;
+            }
         } else if (strcmp(buf, "logfile") == 0) {
             /*LINTED*/
             if (!get_tok(&str, current, (int)(end - current), ',')) {
@@ -1324,7 +1336,8 @@ parseOptions(char *options)
 
     /* Setup logging now */
     if ( logfile!=NULL ) {
-        setup_logging(logfile, logflags);
+        /* ANDROID-CHANGED: Add directlog */
+        setup_logging(logfile, logflags, directlog);
         (void)atexit(&atexit_finish_logging);
     }
 
