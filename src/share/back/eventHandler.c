@@ -883,6 +883,13 @@ static void JNICALL
 cbClassPrepare(jvmtiEnv *jvmti_env, JNIEnv *env,
                         jthread thread, jclass klass)
 {
+    /* ANDROID-CHANGED: b/111394423 Android sends ClassPrepare events for arrays too. We don't
+     * really care about these though and they can cause deadlocks since they may be sent on jit
+     * threads so just ignore them.
+     */
+    if (isArrayClass(klass)) {
+      return;
+    }
     EventInfo info;
 
     LOG_CB(("cbClassPrepare: thread=%p", thread));
@@ -912,6 +919,13 @@ static void JNICALL
 cbClassLoad(jvmtiEnv *jvmti_env, JNIEnv *env,
                         jthread thread, jclass klass)
 {
+    /* ANDROID-CHANGED: b/111394423 Android sends ClassLoad events for arrays too. We don't really
+     * care about these though and they can cause deadlocks since they may be sent on jit threads so
+     * just ignore them.
+     */
+    if (isArrayClass(klass)) {
+      return;
+    }
     EventInfo info;
 
     LOG_CB(("cbClassLoad: thread=%p", thread));
