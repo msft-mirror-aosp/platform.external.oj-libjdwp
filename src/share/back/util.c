@@ -42,6 +42,9 @@ BackendGlobalData *gdata = NULL;
 static jboolean isInterface(jclass clazz);
 static char * getPropertyUTF8(JNIEnv *env, char *propertyName);
 
+static jvmtiError (JNICALL *ext_RawMonitorEnterNoSuspend) (jvmtiEnv* env, jrawMonitorID monitor);
+static jvmtiError (JNICALL *ext_RawMonitorExitNoSuspend) (jvmtiEnv* env, jrawMonitorID monitor);
+
 // ANDROID-CHANGED: Implement a helper to get the current time in milliseconds according to
 // CLOCK_MONOTONIC.
 jlong
@@ -1089,6 +1092,24 @@ debugMonitorExit(jrawMonitorID monitor)
     error = ignore_vm_death(error);
     if (error != JVMTI_ERROR_NONE) {
         EXIT_ERROR(error, "on raw monitor exit");
+    }
+}
+
+/* ANDROID-CHANGED: Add suspension ignoring raw-monitor enter. */
+void debugMonitorEnterNoSuspend(jrawMonitorID monitor)
+{
+    jvmtiError error;
+    while (JNI_TRUE) {
+        error = FUNC_PTR(&gdata,raw_monitor_enter_no_suspend)(gdata->jvmti, monitor);
+        error = ignore_vm_death(error);
+        if (error == JVMTI_ERROR_INTERRUPT) {
+            handleInterrupt();
+        } else {
+            break;
+        }
+    }
+    if (error != JVMTI_ERROR_NONE) {
+        EXIT_ERROR(error, "on raw monitor enter no suspend");
     }
 }
 
