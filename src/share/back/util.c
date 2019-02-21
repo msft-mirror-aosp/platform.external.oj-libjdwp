@@ -24,6 +24,8 @@
  */
 
 #include <ctype.h>
+// ANDROID-CHANGED: Include time.h so we can use clock_gettime to implement milliTime.
+#include <time.h>
 
 #include "util.h"
 #include "transport.h"
@@ -38,8 +40,21 @@ BackendGlobalData *gdata = NULL;
 
 /* Forward declarations */
 static jboolean isInterface(jclass clazz);
-static jboolean isArrayClass(jclass clazz);
 static char * getPropertyUTF8(JNIEnv *env, char *propertyName);
+
+static jvmtiError (JNICALL *ext_RawMonitorEnterNoSuspend) (jvmtiEnv* env, jrawMonitorID monitor);
+static jvmtiError (JNICALL *ext_RawMonitorExitNoSuspend) (jvmtiEnv* env, jrawMonitorID monitor);
+
+// ANDROID-CHANGED: Implement a helper to get the current time in milliseconds according to
+// CLOCK_MONOTONIC.
+jlong
+milliTime(void)
+{
+  struct timespec now;
+  memset(&now, 0, sizeof(now));
+  (void)clock_gettime(CLOCK_MONOTONIC, &now);
+  return ((jlong)now.tv_sec) * 1000LL + ((jlong)now.tv_nsec) / 1000000LL;
+}
 
 /* Save an object reference for use later (create a NewGlobalRef) */
 void
@@ -246,14 +261,18 @@ util_initialize(JNIEnv *env)
                         = getPropertyUTF8(env, "java.version");
         gdata->property_java_vm_name
                         = getPropertyUTF8(env, "java.vm.name");
-        gdata->property_java_vm_info
-                        = getPropertyUTF8(env, "java.vm.info");
+        // ANDROID-CHANGED: Android doesn't provide the 'java.vm.info' property. Just provide the
+        //                  rest of the agent with an empty string to use for it.
+        gdata->property_java_vm_info = jvmtiAllocate(1);
+        gdata->property_java_vm_info[0] = '\0';
         gdata->property_java_class_path
                         = getPropertyUTF8(env, "java.class.path");
+        // ANDROID-CHANGED: Android uses java.boot.class.path to store the bootclasspath.
         gdata->property_sun_boot_class_path
-                        = getPropertyUTF8(env, "sun.boot.class.path");
+                        = getPropertyUTF8(env, "java.boot.class.path");
+        // ANDROID-CHANGED: Android uses java.library.path to store all library path information.
         gdata->property_sun_boot_library_path
-                        = getPropertyUTF8(env, "sun.boot.library.path");
+                        = getPropertyUTF8(env, "java.library.path");
         gdata->property_path_separator
                         = getPropertyUTF8(env, "path.separator");
         gdata->property_user_dir
@@ -626,6 +645,14 @@ jint
 uniqueID(void)
 {
     static jint currentID = 0;
+    // ANDROID-CHANGED: on android we sometimes need to share these id's with DDMS traffic that is
+    // multiplexed on the same connection. Since we don't have any way to know which id's are taken
+    // by DDMS we will instead partition the ids between them. All positive ids (sign-bit == 0) are
+    // reserved for libjdwp. DDMS will take ids with sign-bit == 1. This condition is not expected
+    // to ever be true on a normal debugging session.
+    if (currentID < 0) {
+      currentID = 0;
+    }
     return currentID++;
 }
 
@@ -1068,6 +1095,24 @@ debugMonitorExit(jrawMonitorID monitor)
     }
 }
 
+/* ANDROID-CHANGED: Add suspension ignoring raw-monitor enter. */
+void debugMonitorEnterNoSuspend(jrawMonitorID monitor)
+{
+    jvmtiError error;
+    while (JNI_TRUE) {
+        error = FUNC_PTR(&gdata,raw_monitor_enter_no_suspend)(gdata->jvmti, monitor);
+        error = ignore_vm_death(error);
+        if (error == JVMTI_ERROR_INTERRUPT) {
+            handleInterrupt();
+        } else {
+            break;
+        }
+    }
+    if (error != JVMTI_ERROR_NONE) {
+        EXIT_ERROR(error, "on raw monitor enter no suspend");
+    }
+}
+
 void
 debugMonitorWait(jrawMonitorID monitor)
 {
@@ -1287,7 +1332,8 @@ classStatus(jclass clazz)
     return status;
 }
 
-static jboolean
+/* ANDROID-CHANGED: Make isArrayClass public */
+jboolean
 isArrayClass(jclass clazz)
 {
     jboolean isArray = JNI_FALSE;
@@ -1743,8 +1789,10 @@ isMethodObsolete(jmethodID method)
     return obsolete;
 }
 
-/* Get the jvmti environment to be used with tags */
-static jvmtiEnv *
+/* Get the jvmti environment to be used with tags
+ * ANDROID_CHANGED: Expose this function publicly for use with class-track and other places.
+ */
+jvmtiEnv *
 getSpecialJvmti(void)
 {
     jvmtiEnv  *jvmti;
@@ -1754,8 +1802,10 @@ getSpecialJvmti(void)
     /* Get one time use JVMTI Env */
     jvmtiCapabilities caps;
 
+    // ANDROID-CHANGED: Always get a new jvmti-env using the same version as the main env. This
+    // means that everything will still work even when using a best-effort ArtTiEnv.
     rc = JVM_FUNC_PTR(gdata->jvm,GetEnv)
-                     (gdata->jvm, (void **)&jvmti, JVMTI_VERSION_1);
+                     (gdata->jvm, (void **)&jvmti, jvmtiVersion());
     if (rc != JNI_OK) {
         return NULL;
     }

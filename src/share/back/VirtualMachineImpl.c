@@ -55,6 +55,12 @@ version(PacketInputStream *in, PacketOutputStream *out)
     if (vmVersion == NULL) {
         vmVersion = "<unknown>";
     }
+    // ANDROID-CHANGED: The runtime value of the java.version property has always been "0" on
+    //                  android but the old debugger just sent a different value. Simply sending "0"
+    //                  can confuse some JDWP clients so we will simply say that we are version "8".
+    if (strcmp(gdata->property_java_vm_name, "Dalvik") == 0 && strcmp(vmVersion, "0") == 0) {
+      vmVersion = "8";
+    }
     vmName = gdata->property_java_vm_name;
     if (vmName == NULL) {
         vmName = "<unknown>";
@@ -713,6 +719,9 @@ capabilitiesNew(PacketInputStream *in, PacketOutputStream *out)
         return JNI_TRUE;
     }
 
+    // ANDROID-CHANGED: We want to adjust the capabilities slightly if we are on android.
+    jboolean is_android_runtime = strcmp(gdata->property_java_vm_name, "Dalvik") == 0;
+
     (void)outStream_writeBoolean(out, (jboolean)caps.can_generate_field_modification_events);
     (void)outStream_writeBoolean(out, (jboolean)caps.can_generate_field_access_events);
     (void)outStream_writeBoolean(out, (jboolean)caps.can_get_bytecodes);
@@ -722,7 +731,11 @@ capabilitiesNew(PacketInputStream *in, PacketOutputStream *out)
     (void)outStream_writeBoolean(out, (jboolean)caps.can_get_monitor_info);
 
     /* new since JDWP version 1.4 */
-    (void)outStream_writeBoolean(out, (jboolean)caps.can_redefine_classes);
+    /* ANDROID-CHANGED: some jdwp clients will send us class files for redefineClasses which we do
+     * not support. Set this capability to false and set reserved32 instead to indicate that we do
+     * support .dex file class redefinition.
+     */
+    (void)outStream_writeBoolean(out, (jboolean)caps.can_redefine_classes && !is_android_runtime);
     (void)outStream_writeBoolean(out, (jboolean)JNI_FALSE /* can_add_method */ );
     (void)outStream_writeBoolean(out, (jboolean)JNI_FALSE /* can_unrestrictedly_redefine_classes */ );
     /* 11: canPopFrames */
@@ -757,7 +770,10 @@ capabilitiesNew(PacketInputStream *in, PacketOutputStream *out)
     (void)outStream_writeBoolean(out, (jboolean)JNI_FALSE); /* 29 */
     (void)outStream_writeBoolean(out, (jboolean)JNI_FALSE); /* 30 */
     (void)outStream_writeBoolean(out, (jboolean)JNI_FALSE); /* 31 */
-    (void)outStream_writeBoolean(out, (jboolean)JNI_FALSE); /* 32 */
+    /* ANDROID-CHANGED: Use the reserved32 capability to notify clients that we can support dex
+     * class redefinition.
+     */
+    (void)outStream_writeBoolean(out, (jboolean)caps.can_redefine_classes && is_android_runtime);
     return JNI_TRUE;
 }
 

@@ -39,6 +39,10 @@
 #include "invoker.h"
 #include "sys.h"
 
+// ANDROID-CHANGED: Allow us to initialize VMDebug & ddms apis.
+#include "vmDebug.h"
+#include "DDMImpl.h"
+
 /* How the options get to OnLoad: */
 #define XDEBUG "-Xdebug"
 #define XRUN "-Xrunjdwp"
@@ -55,10 +59,18 @@
     #define DEFAULT_LOGFILE             NULL
 #endif
 
+// ANDROID-CHANGED: Special Art Version to get an ArtTiEnv. This has the same basic api as a
+// jvmtiEnv but generally has a caveat that everything is best effort.
+#define ART_TI_VERSION_1_2 (JVMTI_VERSION_1_2 | 0x40000000)
+
 static jboolean vmInitialized;
 static jrawMonitorID initMonitor;
 static jboolean initComplete;
 static jbyte currentSessionID;
+
+// ANDROID-CHANGED: We need to support OnAttach for android so use this to let other parts know that
+// we aren't fully initialized yet.
+static jboolean isInAttach = JNI_FALSE;
 
 /*
  * Options set through the OnLoad options string. All of these values
@@ -77,6 +89,8 @@ static char *launchOnInit = NULL;           /* launch this app during init */
 static jboolean suspendOnInit = JNI_TRUE;   /* suspend all app threads after init */
 static jboolean dopause = JNI_FALSE;        /* pause for debugger attach */
 static jboolean docoredump = JNI_FALSE;     /* core dump on exit */
+/* ANDROID-CHANGED: Added directlog option */
+static jboolean directlog = JNI_FALSE;      /* Don't add pid to logfile. */
 static char *logfile = NULL;                /* Name of logfile (if logging) */
 static unsigned logflags = 0;               /* Log flags */
 
@@ -190,6 +204,49 @@ compatible_versions(jint major_runtime,     jint minor_runtime,
            minor_runtime >= minor_compiletime;
 }
 
+// ANDROID-CHANGED: Function to get and set the com.android.art.internal.ddm.process_chunk and
+// com.android.art.concurrent.raw_monitor_enter_no_suspend extension functions. This returns JNI_ERR
+// if something went wrong with searching. If the extension is not found we return JNI_OK and don't
+// bother updating the gdata pointer.
+static jint find_extension_functions()
+{
+    jvmtiError error;
+    jvmtiExtensionFunctionInfo* extension_info;
+    jint num_extensions;
+    jboolean found;
+    int i;
+    int j;
+
+    found = JNI_FALSE;
+    error = JVMTI_FUNC_PTR(gdata->jvmti,GetExtensionFunctions)
+            (gdata->jvmti, &num_extensions, &extension_info);
+    if (error != JVMTI_ERROR_NONE) {
+        ERROR_MESSAGE(("JDWP Unable to get jvmti extension functions: %s(%d)",
+                       jvmtiErrorText(error), error));
+        return JNI_ERR;
+    }
+    // We iterate through every extension function even once we found the one we want in order to
+    // clean them all up as we go.
+    for (i = 0; i < num_extensions; i++) {
+        if (strcmp("com.android.art.internal.ddm.process_chunk", extension_info[i].id) == 0) {
+            gdata->ddm_process_chunk = (DdmProcessChunk) extension_info[i].func;
+        }
+        if (strcmp("com.android.art.concurrent.raw_monitor_enter_no_suspend",
+                   extension_info[i].id) == 0) {
+            gdata->raw_monitor_enter_no_suspend = (RawMonitorEnterNoSuspend) extension_info[i].func;
+        }
+        jvmtiDeallocate(extension_info[i].id);
+        jvmtiDeallocate(extension_info[i].short_description);
+        for (j = 0; j < extension_info[i].param_count; j++) {
+            jvmtiDeallocate(extension_info[i].params[j].name);
+        }
+        jvmtiDeallocate(extension_info[i].params);
+        jvmtiDeallocate(extension_info[i].errors);
+    }
+    jvmtiDeallocate(extension_info);
+    return JNI_OK;
+}
+
 /* OnLoad startup:
  *   Returning JNI_ERR will cause the java_g VM to core dump, be careful.
  */
@@ -233,11 +290,23 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
     /* Get the JVMTI Env, IMPORTANT: Do this first! For jvmtiAllocate(). */
     error = JVM_FUNC_PTR(vm,GetEnv)
                 (vm, (void **)&(gdata->jvmti), JVMTI_VERSION_1);
+    // ANDROID-CHANGED: Check for ART_TI_VERSION_1_2 if we cannot get real JVMTI. This is done only
+    // to support the userdebug debug-anything behavior.
     if (error != JNI_OK) {
         ERROR_MESSAGE(("JDWP unable to access JVMTI Version 1 (0x%x),"
-                         " is your J2SE a 1.5 or newer version?"
+                         " retrying using ART_TI instead since this might be a userdebug device."
                          " JNIEnv's GetEnv() returned %d",
                          JVMTI_VERSION_1, error));
+        // Try to get an ArtTiEnv instead
+        error = JVM_FUNC_PTR(vm,GetEnv)
+                    (vm, (void **)&(gdata->jvmti), ART_TI_VERSION_1_2);
+    }
+    if (error != JNI_OK) {
+        ERROR_MESSAGE(("JDWP unable to access either JVMTI Version 1 (0x%x)"
+                         " or ART_TI_VERSION_1_2 (0x%x),"
+                         " is your J2SE a 1.5 or newer version?"
+                         " JNIEnv's GetEnv() returned %d",
+                         JVMTI_VERSION_1, ART_TI_VERSION_1_2, error));
         forceExit(1); /* Kill entire process, no core dump */
     }
 
@@ -268,8 +337,9 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
         forceExit(1); /* Kill entire process, no core dump wanted */
     }
 
+    // ANDROID-CHANGED: Android uses java.library.path to store all library path information.
     JVMTI_FUNC_PTR(gdata->jvmti, GetSystemProperty)
-        (gdata->jvmti, (const char *)"sun.boot.library.path",
+        (gdata->jvmti, (const char *)"java.library.path",
          &boot_path);
 
     dbgsysBuildLibName(npt_lib, sizeof(npt_lib), boot_path, NPT_LIBNAME);
@@ -319,6 +389,8 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
     needed_capabilities.can_maintain_original_method_order      = 1;
     needed_capabilities.can_generate_monitor_events             = 1;
     needed_capabilities.can_tag_objects                         = 1;
+    /* ANDROID-CHANGED: Needed for how we implement commonRef tracking */
+    needed_capabilities.can_generate_object_free_events         = 1;
 
     /* And what potential ones that would be nice to have */
     needed_capabilities.can_force_early_return
@@ -392,6 +464,13 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
     if (error != JVMTI_ERROR_NONE) {
         ERROR_MESSAGE(("JDWP unable to set JVMTI event callbacks: %s(%d)",
                         jvmtiErrorText(error), error));
+        return JNI_ERR;
+    }
+
+    // ANDROID-CHANGED: Find com.android.art.internal.ddm.process_chunk function if it exists.
+    if (find_extension_functions() != JNI_OK || gdata->raw_monitor_enter_no_suspend == NULL) {
+        ERROR_MESSAGE(("Fatal error while attempting to find the "
+                       "com.android.art.internal.ddm.process_chunk extension function"));
         return JNI_ERR;
     }
 
@@ -726,6 +805,12 @@ initialize(JNIEnv *env, jthread thread, EventIndex triggering_ei)
     classTrack_initialize(env);
     debugLoop_initialize();
 
+    // ANDROID-CHANGED: Set up DDM
+    DDM_initialize();
+
+    // ANDROID-CHANGED: Take over relevant VMDebug APIs.
+    vmDebug_initalize(env);
+
     initMonitor = debugMonitorCreate("JDWP Initialization Monitor");
 
 
@@ -758,7 +843,10 @@ initialize(JNIEnv *env, jthread thread, EventIndex triggering_ei)
 
     suspendPolicy = suspendOnInit ? JDWP_SUSPEND_POLICY(ALL)
                                   : JDWP_SUSPEND_POLICY(NONE);
-    if (triggering_ei == EI_VM_INIT) {
+    // ANDROID-CHANGED: Don't send any event if we are actually in Agent_OnAttach.
+    if (isInAttach) {
+      // Do Nothing.
+    } else if (triggering_ei == EI_VM_INIT) {
         LOG_MISC(("triggering_ei == EI_VM_INIT"));
         eventHelper_reportVMInit(env, currentSessionID, thread, suspendPolicy);
     } else {
@@ -924,6 +1012,8 @@ printUsage(void)
  "pause=y|n                    pause to debug PID                n\n"
  "coredump=y|n                 coredump at exit                  n\n"
  "errorexit=y|n                exit on any error                 n\n"
+ /* ANDROID-CHANGED: Added directlog */
+ "directlog                    do not add pid to name of logfile n\n"
  "logfile=filename             name of log file                  none\n"
  "logflags=flags               log flags (bitmask)               none\n"
  "                               JVM calls     = 0x001\n"
@@ -1029,7 +1119,11 @@ parseOptions(char *options)
     /* Set defaults */
     gdata->assertOn     = DEFAULT_ASSERT_ON;
     gdata->assertFatal  = DEFAULT_ASSERT_FATAL;
+    /* ANDROID-CHANGED: Add directlog */
+    directlog           = JNI_FALSE;
     logfile             = DEFAULT_LOGFILE;
+    // ANDROID-CHANGED: By default we assume ddms is off initially.
+    gdata->ddmInitiallyActive = JNI_FALSE;
 
     /* Options being NULL will end up being an error. */
     if (options == NULL) {
@@ -1182,6 +1276,12 @@ parseOptions(char *options)
         } else if (strcmp(buf, "precrash") == 0) {
             errmsg = "The precrash option removed, use -XX:OnError";
             goto bad_option_with_errmsg;
+        } else if (strcmp(buf, "directlog") == 0) {
+            /* ANDROID-CHANGED: Added directlog */
+            /*LINTED*/
+            if ( !get_boolean(&str, &directlog) ) {
+                goto syntax_error;
+            }
         } else if (strcmp(buf, "logfile") == 0) {
             /*LINTED*/
             if (!get_tok(&str, current, (int)(end - current), ',')) {
@@ -1231,6 +1331,11 @@ parseOptions(char *options)
             if ( !get_boolean(&str, &useStandardAlloc) ) {
                 goto syntax_error;
             }
+        // ANDROID-CHANGED: Need to be able to tell if ddm is initially running.
+        } else if ( strcmp(buf, "ddm_already_active")==0 ) {
+            if ( !get_boolean(&str, &(gdata->ddmInitiallyActive)) ) {
+                goto syntax_error;
+            }
         } else {
             goto syntax_error;
         }
@@ -1238,7 +1343,8 @@ parseOptions(char *options)
 
     /* Setup logging now */
     if ( logfile!=NULL ) {
-        setup_logging(logfile, logflags);
+        /* ANDROID-CHANGED: Add directlog */
+        setup_logging(logfile, logflags, directlog);
         (void)atexit(&atexit_finish_logging);
     }
 
@@ -1346,4 +1452,54 @@ debugInit_exit(jvmtiError error, const char *msg)
 
     // Last chance to die, this kills the entire process.
     forceExit(EXIT_JVMTI_ERROR);
+}
+
+// ANDROID-CHANGED: Support jdwp loading with OnAttach.
+static jint doInitializeOnAttach(JavaVM* vm) {
+    JNIEnv* jnienv = NULL;
+    jvmtiError error = JVM_FUNC_PTR(vm,GetEnv)
+                (vm, (void **)&(jnienv), JNI_VERSION_1_6);
+    if (error != JNI_OK) {
+        ERROR_MESSAGE(("JDWP unable to access jni (0x%x),"
+                         " is your J2SE a 1.6 or newer version?"
+                         " JNIEnv's GetEnv() returned %d",
+                         JNI_VERSION_1_6, error));
+        return JNI_ERR;
+    }
+    jthread currentThread;
+    error = JVMTI_FUNC_PTR(gdata->jvmti,GetCurrentThread)
+                (gdata->jvmti, &currentThread);
+    if (error != JVMTI_ERROR_NONE) {
+        ERROR_MESSAGE(("JDWP unable to get current thread during agent attach: %s(%d)",
+                        jvmtiErrorText(error), error));
+        return JNI_ERR;
+    }
+    // Pretend to send the VM_INIT event.
+    cbEarlyVMInit(gdata->jvmti, jnienv, currentThread);
+    return JNI_OK;
+}
+
+/* OnAttach startup:
+ * ANDROID-CHANGED: We need this to support the way android normally uses debuggers.
+ */
+JNIEXPORT jint JNICALL
+Agent_OnAttach(JavaVM* vm, char* options, void* reserved)
+{
+    isInAttach = JNI_TRUE;
+    // SuspendOnInit should default to false in late-attach scenario since it is not supported.
+    suspendOnInit = JNI_FALSE;
+    if (Agent_OnLoad(vm, options, reserved) != JNI_OK) {
+        return JNI_ERR;
+    }
+    jint res;
+    if (suspendOnInit) {
+        ERROR_MESSAGE(("JDWP cannot suspend all threads when performing late-attach."));
+        return JNI_ERR;
+    } else if (!initOnUncaught && (initOnException == NULL)) {
+        res = doInitializeOnAttach(vm);
+    } else {
+        res = JNI_OK;
+    }
+    isInAttach = JNI_FALSE;
+    return res;
 }

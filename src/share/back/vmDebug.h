@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2017, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,25 +23,15 @@
  * questions.
  */
 
-#ifndef JDWP_COMMONREF_H
-#define JDWP_COMMONREF_H
+#include <jni.h>
 
-void commonRef_initialize(void);
-void commonRef_reset(JNIEnv *env);
+#ifndef JDWP_VMDEBUG_H
+#define JDWP_VMDEBUG_H
 
-jlong commonRef_refToID(JNIEnv *env, jobject ref);
-jobject commonRef_idToRef(JNIEnv *env, jlong id);
-void commonRef_idToRef_delete(JNIEnv *env, jobject ref);
-jvmtiError commonRef_pin(jlong id);
-jvmtiError commonRef_unpin(jlong id);
-void commonRef_releaseMultiple(JNIEnv *env, jlong id, jint refCount);
-void commonRef_release(JNIEnv *env, jlong id);
-void commonRef_compact(void);
-
-/* ANDROID-CHANGED: Called when an object is freed. This is called without any synchronization. */
-void commonRef_handleFreedObject(jlong tag);
-
-void commonRef_lock(void);
-void commonRef_unlock(void);
+void vmDebug_initalize(JNIEnv* env);
+void vmDebug_notifyDebuggerActivityStart(void);
+void vmDebug_notifyDebuggerActivityEnd(void);
+void vmDebug_onDisconnect(void);
 
 #endif
+

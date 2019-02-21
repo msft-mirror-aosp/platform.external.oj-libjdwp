@@ -32,6 +32,12 @@
 #include "outStream.h"
 #include "threadControl.h"
 
+// ANDROID-CHANGED: Needed for DDM_onDisconnect
+#include "DDMImpl.h"
+// ANDROID-CHANGED: Needed for vmDebug_onDisconnect, vmDebug_notifyDebuggerActivityStart &
+// vmDebug_notifyDebuggerActivityEnd.
+#include "vmDebug.h"
+
 
 static void JNICALL reader(jvmtiEnv* jvmti_env, JNIEnv* jni_env, void* arg);
 static void enqueue(jdwpPacket *p);
@@ -133,6 +139,13 @@ debugLoop_run(void)
              */
             debugMonitorEnter(vmDeathLock);
 
+            // ANDROID-CHANGED: Tell vmDebug we have started doing some debugger activity. We only
+            // do this if the cmdSet is not DDMS for historical reasons.
+            jboolean is_ddms = (cmd->cmdSet == JDWP_COMMAND_SET(DDM));
+            if (!is_ddms) {
+                vmDebug_notifyDebuggerActivityStart();
+            }
+
             /* Initialize the input and output streams */
             inStream_init(&in, p);
             outStream_initReply(&out, inStream_id(&in));
@@ -157,6 +170,11 @@ debugLoop_run(void)
             } else {
                 /* Call the command handler */
                 replyToSender = func(&in, &out);
+            }
+
+            // ANDROID-CHANGED: Tell vmDebug we are done with the current debugger activity.
+            if (!is_ddms) {
+                vmDebug_notifyDebuggerActivityEnd();
             }
 
             /* Reply to the sender */
@@ -188,6 +206,11 @@ debugLoop_run(void)
      */
     transport_close();
     debugMonitorDestroy(cmdQueueLock);
+
+    // ANDROID-CHANGED: Tell vmDebug we have disconnected.
+    vmDebug_onDisconnect();
+    // ANDROID-CHANGED: DDM needs to call some functions when we disconnect.
+    DDM_onDisconnect();
 
     /* Reset for a new connection to this VM if it's still alive */
     if ( ! gdata->vmDead ) {
