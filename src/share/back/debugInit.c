@@ -259,7 +259,6 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
     jint              jvmtiCompileTimeMajorVersion;
     jint              jvmtiCompileTimeMinorVersion;
     jint              jvmtiCompileTimeMicroVersion;
-    char              *boot_path = NULL;
     char              npt_lib[MAXPATHLEN];
 
     /* See if it's already loaded */
@@ -337,15 +336,10 @@ Agent_OnLoad(JavaVM *vm, char *options, void *reserved)
         forceExit(1); /* Kill entire process, no core dump wanted */
     }
 
-    // ANDROID-CHANGED: Android uses java.library.path to store all library path information.
-    JVMTI_FUNC_PTR(gdata->jvmti, GetSystemProperty)
-        (gdata->jvmti, (const char *)"java.library.path",
-         &boot_path);
-
-    dbgsysBuildLibName(npt_lib, sizeof(npt_lib), boot_path, NPT_LIBNAME);
+    // ANDROID-CHANGED: Load libnpt.so with no path to use the system linker config to find it.
+    dbgsysBuildLibName(npt_lib, sizeof(npt_lib), "", NPT_LIBNAME);
     /* Npt and Utf function init */
     NPT_INITIALIZE(npt_lib, &(gdata->npt), NPT_VERSION, NULL);
-    jvmtiDeallocate(boot_path);
     if (gdata->npt == NULL) {
         ERROR_MESSAGE(("JDWP: unable to initialize NPT library"));
         return JNI_ERR;
