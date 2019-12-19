@@ -63,10 +63,6 @@ cc_library {
         "libnpt_headers",
     ],
     defaults: ["upstream-jdwp-defaults"],
-    apex_available: [
-        "com.android.art.release",
-        "com.android.art.debug",
-    ],
 }
 
 cc_library_headers {
@@ -108,10 +104,6 @@ cc_library {
         "libdt_socket",
     ],
     defaults: ["upstream-jdwp-defaults"],
-    apex_available: [
-        "com.android.art.release",
-        "com.android.art.debug",
-    ],
 }
 
 cc_library {
@@ -131,10 +123,6 @@ cc_library {
     ],
     required: ["libnpt"],
     defaults: ["upstream-jdwp-defaults"],
-    apex_available: [
-        "com.android.art.release",
-        "com.android.art.debug",
-    ],
 }
 
 genrule {
