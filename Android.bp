@@ -165,7 +165,6 @@ java_library_host {
     "src/share/classes/com/sun/tools/jdi/ProcessAttachingConnector.java",
   ],
   services: ["etc/com.sun.jdi.connect.Connector"],
-  java_version: "1.8",
   javacflags: ["-g"],
   notice: "LICENSE",
 }
