@@ -79,6 +79,7 @@ cc_library_headers {
         "com.android.art",
         "com.android.art.debug",
     ],
+    min_sdk_version: "S",
 }
 
 cc_library_headers {
@@ -93,6 +94,7 @@ cc_library_headers {
         "com.android.art",
         "com.android.art.debug",
     ],
+    min_sdk_version: "S",
 }
 
 cc_library {
@@ -110,6 +112,7 @@ cc_library {
         "com.android.art",
         "com.android.art.debug",
     ],
+    min_sdk_version: "S",
 }
 
 cc_library_headers {
@@ -127,6 +130,7 @@ cc_library_headers {
         "com.android.art",
         "com.android.art.debug",
     ],
+    min_sdk_version: "S",
 }
 
 cc_library {
@@ -160,6 +164,7 @@ cc_library {
         "com.android.art",
         "com.android.art.debug",
     ],
+    min_sdk_version: "S",
 }
 
 cc_library {
@@ -183,6 +188,7 @@ cc_library {
         "com.android.art",
         "com.android.art.debug",
     ],
+    min_sdk_version: "S",
 }
 
 genrule {
