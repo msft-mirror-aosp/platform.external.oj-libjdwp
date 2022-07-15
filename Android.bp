@@ -58,7 +58,6 @@ cc_defaults {
         "-Werror",
         "-Wno-unused-parameter",
     ],
-    notice: "LICENSE",
     target: {
         darwin: {
             enabled: false,
@@ -233,5 +232,4 @@ java_library_host {
   services: ["etc/com.sun.jdi.connect.Connector"],
   java_version: "1.8",
   javacflags: ["-g"],
-  notice: "LICENSE",
 }
