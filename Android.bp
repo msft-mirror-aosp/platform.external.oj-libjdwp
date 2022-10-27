@@ -229,4 +229,10 @@ java_library_host {
   services: ["etc/com.sun.jdi.connect.Connector"],
   java_version: "1.8",
   javacflags: ["-g"],
+  errorprone: {
+    javacflags: [
+      "-Xep:ReturnValueIgnored:WARN",
+      "-Xep:EmptyTopLevelDeclaration:WARN",
+    ],
+  },
 }
