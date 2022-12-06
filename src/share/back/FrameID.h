@@ -26,9 +26,6 @@
 #ifndef JDWP_FRAMEID_H
 #define JDWP_FRAMEID_H
 
-#include "jvmti.h"
-#include "util.h"
-
 typedef jlong FrameID;
 
 FrameID createFrameID(jthread thread, FrameNumber fnum);
