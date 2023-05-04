@@ -343,7 +343,9 @@ findNodeByID(JNIEnv *env, jlong id)
             if ( node->prev != NULL ) {
                 /* Re-order hash list so this one is up front */
                 node->prev->next = node->next;
-                node->prev->prev = node->prev;
+                if (node->next != NULL) {
+                    node->next->prev = node->prev;
+                }
                 node->next = gdata->objectsByID[slot];
                 node->next->prev = node;
                 node->prev = NULL;
