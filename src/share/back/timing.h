@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2004, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,16 +23,18 @@
  * questions.
  */
 
-#ifndef JDWP_FRAMEID_H
-#define JDWP_FRAMEID_H
+#ifndef JDWP_ART_METRICS_H
+#define JDWP_ART_METRICS_H
 
-#include "jvmti.h"
-#include "util.h"
+// ANDROID-CHANGED: This whole file
 
-typedef jlong FrameID;
+#include <jni.h>
 
-FrameID createFrameID(jthread thread, FrameNumber fnum);
-FrameNumber getFrameNumber(FrameID frame);
-jdwpError validateFrameID(jthread thread, FrameID frame);
+// Currently none of these methods are synchronized since they are only called
+// in the debugLoop thread. If we need to call this from multiple threads in the
+// future, we should add a Lock!
+void timings_startCmd(jint id, jint cmd_set, jint cmd);
+void timings_endCmd();
+void timings_flush();
 
 #endif
