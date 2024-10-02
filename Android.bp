@@ -151,7 +151,7 @@ cc_library {
         "libjdwp_headers",
         "libnpt_headers",
     ],
-    required: [
+    runtime_libs: [
         "libnpt",
         "libdt_socket",
     ],
@@ -178,7 +178,7 @@ cc_library {
         "libjdwp_headers",
         "libnpt_headers",
     ],
-    required: ["libnpt"],
+    runtime_libs: ["libnpt"],
     defaults: ["upstream-jdwp-defaults"],
     apex_available: [
         "com.android.art",
