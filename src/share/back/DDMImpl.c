@@ -30,7 +30,7 @@
 #include "inStream.h"
 #include "outStream.h"
 
-static _Atomic(jboolean) ddmIsActive = ATOMIC_VAR_INIT(JNI_FALSE);
+static _Atomic(jboolean) ddmIsActive = JNI_FALSE;
 
 static void
 SendDdmBroadcast(JNIEnv* env, jboolean connected)

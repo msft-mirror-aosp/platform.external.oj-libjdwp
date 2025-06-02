@@ -34,8 +34,8 @@
 #include "eventHelper.h"
 #include "threadControl.h"
 
-static _Atomic(jlong) lastDebuggerActivity = ATOMIC_VAR_INIT(0LL);
-static _Atomic(jboolean) hasSeenDebuggerActivity = ATOMIC_VAR_INIT(JNI_FALSE);
+static _Atomic(jlong) lastDebuggerActivity = 0LL;
+static _Atomic(jboolean) hasSeenDebuggerActivity = JNI_FALSE;
 
 // Reset the tracking variables.
 void vmDebug_onDisconnect()
